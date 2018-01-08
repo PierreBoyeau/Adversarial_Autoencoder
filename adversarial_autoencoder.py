@@ -4,7 +4,6 @@ import datetime
 import os
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
-from tensorflow.examples.tutorials.mnist import input_data
 
 # Progressbar
 # bar = progressbar.ProgressBar(widgets=['[', progressbar.Timer(), ']', progressbar.Bar(), '(', progressbar.ETA(), ')'])
@@ -16,17 +15,18 @@ shuffled_dataset = dataset.copy()
 
 # Parameters
 input_dim = 784
-n_l1 = 1000
-n_l2 = 1000
+n_l1 = 64
+n_l2 = 64
 
 
 IM_SIZE = 64
 NB_CHANNELS = 3
 Z_DIM = 128
-BATCH_SIZE = 100
+BATCH_SIZE = 32
 N_EPOCHS = 500
-learning_rate = 0.001
+learning_rate = 0.00005
 beta1 = 0.9
+TRAIN_DISC_EVERY = 5
 results_path = './Results/Adversarial_Autoencoder'
 
 # Placeholders for input data and the targets
@@ -144,38 +144,39 @@ def encoder2d(x, reuse=False):
     with tf.name_scope('Encoder'):
         conv1 = tf.layers.conv2d(
             inputs=x,
-            filters=32,
+            filters=64,
             kernel_size=[3, 3],
             padding="same",
             activation=tf.nn.relu,
             name="e_conv1")
-        pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2)
+        pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2, name='e_pool1')
         conv2 = tf.layers.conv2d(
             inputs=pool1,
-            filters=16,
+            filters=64,
             kernel_size=[3, 3],
             padding="same",
             activation=tf.nn.relu,
             name="e_conv2")
-        pool2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2)
+        pool2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2, name='e_pool2')
+        # pool2_flattened = tf.layers.flatten(pool2, name='e_pool2flatten')
+
         conv3 = tf.layers.conv2d(
             inputs=pool2,
-            filters=16,
+            filters=128,
             kernel_size=[3, 3],
             padding="same",
             activation=tf.nn.relu,
             name="e_conv3")
-        pool3 = tf.layers.max_pooling2d(inputs=conv3, pool_size=[2, 2], strides=2)
-        conv4 = tf.layers.conv2d(
-            inputs=pool3,
-            filters=8,
-            kernel_size=[2, 2],
-            padding="same",
-            activation=tf.nn.relu,
-            name="e_conv4")
-        pool4 = tf.layers.max_pooling2d(inputs=conv4, pool_size=[2, 2], strides=2)
-        bottleneck = tf.layers.flatten(pool4)
-        return bottleneck
+        pool3 = tf.layers.max_pooling2d(inputs=conv3, pool_size=[2, 2], strides=2, name='e_pool3')
+        pool3_flattened = tf.layers.flatten(pool3, name='e_pool3flatten')
+
+        batch_norm1 = tf.layers.batch_normalization(pool3_flattened, name='e_batch_norm1')
+        fc1 = tf.layers.dense(inputs=batch_norm1, units=1024, activation=tf.nn.relu, name='e_fc1')
+        batch_norm2 = tf.layers.batch_normalization(fc1, name='e_batch_norm2')
+        fc2 = tf.layers.dense(inputs=batch_norm2, units=Z_DIM, activation=tf.nn.relu, name='e_fc2')
+
+        print fc2.get_shape()
+        return fc2
 
 
 def decoder2d(x, reuse=False):
@@ -188,57 +189,64 @@ def decoder2d(x, reuse=False):
     if reuse:
         tf.get_variable_scope().reuse_variables()
     with tf.name_scope('Decoder'):
-        x_reshaped = tf.reshape(x, [-1, 4, 4, 8])
+        d_fc1 = tf.layers.dense(inputs=x, units=1024, activation=tf.nn.relu, name='d_fc1')
+        d_batch_norm1 = tf.layers.batch_normalization(d_fc1, name='d_batch_norm1')
+        d_fc2 = tf.layers.dense(inputs=d_batch_norm1, units=int(IM_SIZE/8*IM_SIZE/8*128), activation=tf.nn.relu, name='d_fc2')
+        d_batch_norm2 = tf.layers.batch_normalization(d_fc2, name='d_batch_norm2')
+        d_fc2_reshaped = tf.reshape(d_batch_norm2, [-1, int(IM_SIZE/8), int(IM_SIZE/8), 128], name='d_fc2flatten')
+
         deconv1 = tf.layers.conv2d(
-                                   inputs=x_reshaped,
-                                   filters=8,
-                                   kernel_size=[2, 2],
-                                   padding="same",
-                                   activation=tf.nn.relu,
-                                   name="d_conv1")
+            inputs=d_fc2_reshaped,
+            filters=128,
+            kernel_size=[3, 3],
+            padding="same",
+            activation=tf.nn.relu,
+            name="d_conv1")
         upsample1 = tf.image.resize_images(
-                                           images=deconv1,
-                                           size=[8, 8],
-                                           method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+            images=deconv1,
+            size=[IM_SIZE / 4, IM_SIZE / 4],
+            method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+
         deconv2 = tf.layers.conv2d(
                                    inputs=upsample1,
-                                   filters=16,
+                                   filters=64,
                                    kernel_size=[3, 3],
                                    padding="same",
                                    activation=tf.nn.relu,
                                    name="d_conv2")
         upsample2 = tf.image.resize_images(
                                            images=deconv2,
-                                           size=[16, 16],
+                                           size=[IM_SIZE / 2, IM_SIZE / 2],
                                            method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
         deconv3 = tf.layers.conv2d(
                                    inputs=upsample2,
-                                   filters=16,
+                                   filters=64,
                                    kernel_size=[3, 3],
                                    padding="same",
                                    activation=tf.nn.relu,
                                    name="d_conv3")
         upsample3 = tf.image.resize_images(
                                            images=deconv3,
-                                           size=[32, 32],
-                                           method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        deconv4 = tf.layers.conv2d(
-                                   inputs=upsample3,
-                                   filters=32,
-                                   kernel_size=[3, 3],
-                                   padding="same",
-                                   activation=tf.nn.relu,
-                                   name="d_conv4")
-        upsample4 = tf.image.resize_images(
-                                           images=deconv4,
                                            size=[IM_SIZE, IM_SIZE],
                                            method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        # deconv4 = tf.layers.conv2d(
+        #                            inputs=upsample3,
+        #                            filters=32,
+        #                            kernel_size=[3, 3],
+        #                            padding="same",
+        #                            activation=tf.nn.relu,
+        #                            name="d_conv4")
+        # upsample4 = tf.image.resize_images(
+        #                                    images=deconv4,
+        #                                    size=[IM_SIZE, IM_SIZE],
+        #                                    method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
         decoded = tf.layers.conv2d(
-                                   inputs=upsample4,
+                                   inputs=upsample3,
                                    filters=NB_CHANNELS,
                                    kernel_size=[3, 3],
                                    padding="same",
-                                   activation=tf.nn.sigmoid)
+                                   activation=tf.nn.sigmoid,
+                                   name='d_lastconv')
         return decoded
 
 
@@ -268,6 +276,7 @@ def train(train_model=True):
     with tf.variable_scope(tf.get_variable_scope()):
         encoder_output = encoder2d(x_input)
         decoder_output = decoder2d(encoder_output)
+        print decoder_output.get_shape()
 
     with tf.variable_scope(tf.get_variable_scope()):
         d_real = discriminator(real_distribution)
@@ -312,14 +321,15 @@ def train(train_model=True):
     tf.summary.scalar(name='Generator Loss', tensor=generator_loss)
     tf.summary.histogram(name='Encoder Distribution', values=encoder_output)
     tf.summary.histogram(name='Real Distribution', values=real_distribution)
-    tf.summary.image(name='Input Images', tensor=input_images, max_outputs=10)
-    tf.summary.image(name='Generated Images', tensor=generated_images, max_outputs=10)
+    tf.summary.image(name='Input Images', tensor=input_images, max_outputs=5)
+    tf.summary.image(name='Generated Images', tensor=generated_images, max_outputs=5)
     summary_op = tf.summary.merge_all()
 
     # Saving the model
     saver = tf.train.Saver()
     step = 0
-    with tf.Session() as sess:
+
+    with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
         if train_model:
             tensorboard_path, saved_model_path, log_path = form_results()
             sess.run(init)
@@ -335,10 +345,13 @@ def train(train_model=True):
                     begin = (b-1)*BATCH_SIZE
                     end = min(b*BATCH_SIZE, len(dataset))
                     batch_x = shuffled_dataset[begin:end]
+
                     sess.run(autoencoder_optimizer, feed_dict={x_input: batch_x, x_target: batch_x})
-                    sess.run(discriminator_optimizer,
-                             feed_dict={x_input: batch_x, x_target: batch_x, real_distribution: z_real_dist})
                     sess.run(generator_optimizer, feed_dict={x_input: batch_x, x_target: batch_x})
+                    if b % TRAIN_DISC_EVERY == 0:
+                        sess.run(discriminator_optimizer,
+                                 feed_dict={x_input: batch_x, x_target: batch_x, real_distribution: z_real_dist})
+
                     if b % 5 == 0:
                         a_loss, d_loss, g_loss, summary = sess.run(
                             [autoencoder_loss, dc_loss, generator_loss, summary_op],
