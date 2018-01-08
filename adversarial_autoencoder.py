@@ -10,24 +10,30 @@ from tensorflow.examples.tutorials.mnist import input_data
 # bar = progressbar.ProgressBar(widgets=['[', progressbar.Timer(), ']', progressbar.Bar(), '(', progressbar.ETA(), ')'])
 
 # Get the MNIST data
-mnist = input_data.read_data_sets('./Data', one_hot=True)
+# mnist = input_data.read_data_sets('./Data', one_hot=True)
+dataset = np.load("data/training_data.npy")
+shuffled_dataset = dataset.copy()
 
 # Parameters
 input_dim = 784
 n_l1 = 1000
 n_l2 = 1000
-z_dim = 2
-batch_size = 100
-n_epochs = 1000
+
+
+IM_SIZE = 64
+NB_CHANNELS = 3
+Z_DIM = 128
+BATCH_SIZE = 100
+N_EPOCHS = 1000
 learning_rate = 0.001
 beta1 = 0.9
 results_path = './Results/Adversarial_Autoencoder'
 
 # Placeholders for input data and the targets
-x_input = tf.placeholder(dtype=tf.float32, shape=[batch_size, input_dim], name='Input')
-x_target = tf.placeholder(dtype=tf.float32, shape=[batch_size, input_dim], name='Target')
-real_distribution = tf.placeholder(dtype=tf.float32, shape=[batch_size, z_dim], name='Real_distribution')
-decoder_input = tf.placeholder(dtype=tf.float32, shape=[1, z_dim], name='Decoder_input')
+x_input = tf.placeholder(dtype=tf.float32, shape=[BATCH_SIZE, IM_SIZE, IM_SIZE, NB_CHANNELS], name='Input')
+x_target = tf.placeholder(dtype=tf.float32, shape=[BATCH_SIZE, IM_SIZE, IM_SIZE, NB_CHANNELS], name='Target')
+real_distribution = tf.placeholder(dtype=tf.float32, shape=[BATCH_SIZE, Z_DIM], name='Real_distribution')
+decoder_input = tf.placeholder(dtype=tf.float32, shape=[1, Z_DIM], name='Decoder_input')
 
 
 def form_results():
@@ -36,7 +42,7 @@ def form_results():
     :return: three string pointing to tensorboard, saved models and log paths respectively.
     """
     folder_name = "/{0}_{1}_{2}_{3}_{4}_{5}_Adversarial_Autoencoder". \
-        format(datetime.datetime.now(), z_dim, learning_rate, batch_size, n_epochs, beta1)
+        format(datetime.datetime.now(), Z_DIM, learning_rate, BATCH_SIZE, N_EPOCHS, beta1)
     tensorboard_path = results_path + folder_name + '/Tensorboard'
     saved_model_path = results_path + folder_name + '/Saved_models/'
     log_path = results_path + folder_name + '/log'
@@ -82,7 +88,7 @@ def dense(x, n1, n2, name):
     :param n1: no. of input neurons
     :param n2: no. of output neurons
     :param name: name of the entire dense layer.i.e, variable scope name.
-    :return: tensor with shape [batch_size, n2]
+    :return: tensor with shape [BATCH_SIZE, n2]
     """
     with tf.variable_scope(name, reuse=None):
         weights = tf.get_variable("weights", shape=[n1, n2],
@@ -105,7 +111,7 @@ def encoder(x, reuse=False):
     with tf.name_scope('Encoder'):
         e_dense_1 = tf.nn.relu(dense(x, input_dim, n_l1, 'e_dense_1'))
         e_dense_2 = tf.nn.relu(dense(e_dense_1, n_l1, n_l2, 'e_dense_2'))
-        latent_variable = dense(e_dense_2, n_l2, z_dim, 'e_latent_variable')
+        latent_variable = dense(e_dense_2, n_l2, Z_DIM, 'e_latent_variable')
         return latent_variable
 
 
@@ -119,24 +125,135 @@ def decoder(x, reuse=False):
     if reuse:
         tf.get_variable_scope().reuse_variables()
     with tf.name_scope('Decoder'):
-        d_dense_1 = tf.nn.relu(dense(x, z_dim, n_l2, 'd_dense_1'))
+        d_dense_1 = tf.nn.relu(dense(x, Z_DIM, n_l2, 'd_dense_1'))
         d_dense_2 = tf.nn.relu(dense(d_dense_1, n_l2, n_l1, 'd_dense_2'))
         output = tf.nn.sigmoid(dense(d_dense_2, n_l1, input_dim, 'd_output'))
         return output
 
 
+# The autoencoder network
+def encoder2d(x, reuse=False):
+    """
+    Encode part of the autoencoder.
+    :param x: input to the autoencoder
+    :param reuse: True -> Reuse the encoder variables, False -> Create or search of variables before creating
+    :return: tensor which is the hidden latent variable of the autoencoder.
+    """
+    if reuse:
+        tf.get_variable_scope().reuse_variables()
+    with tf.name_scope('Encoder'):
+        conv1 = tf.layers.conv2d(
+            inputs=x,
+            filters=32,
+            kernel_size=[3, 3],
+            padding="same",
+            activation=tf.nn.relu,
+            name="e_conv1")
+        pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2)
+        conv2 = tf.layers.conv2d(
+            inputs=pool1,
+            filters=16,
+            kernel_size=[3, 3],
+            padding="same",
+            activation=tf.nn.relu,
+            name="e_conv2")
+        pool2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2)
+        conv3 = tf.layers.conv2d(
+            inputs=pool2,
+            filters=16,
+            kernel_size=[3, 3],
+            padding="same",
+            activation=tf.nn.relu,
+            name="e_conv3")
+        pool3 = tf.layers.max_pooling2d(inputs=conv3, pool_size=[2, 2], strides=2)
+        conv4 = tf.layers.conv2d(
+            inputs=pool3,
+            filters=8,
+            kernel_size=[2, 2],
+            padding="same",
+            activation=tf.nn.relu,
+            name="e_conv3")
+        pool4 = tf.layers.max_pooling2d(inputs=conv4, pool_size=[2, 2], strides=2)
+        bottleneck = tf.layers.flatten(pool4)
+        return bottleneck
+
+
+def decoder2d(x, reuse=False):
+    """
+    Decoder part of the autoencoder.
+    :param x: input to the decoder
+    :param reuse: True -> Reuse the decoder variables, False -> Create or search of variables before creating
+    :return: tensor which should ideally be the input given to the encoder.
+    """
+    if reuse:
+        tf.get_variable_scope().reuse_variables()
+    with tf.name_scope('Decoder'):
+        x_reshaped = tf.reshape(x, [-1, 4, 4, 8])
+        deconv1 = tf.layers.conv2d(
+                                   inputs=x_reshaped,
+                                   filters=8,
+                                   kernel_size=[2, 2],
+                                   padding="same",
+                                   activation=tf.nn.relu,
+                                   name="d_conv1")
+        upsample1 = tf.image.resize_images(
+                                           images=deconv1,
+                                           size=[8, 8],
+                                           method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        deconv2 = tf.layers.conv2d(
+                                   inputs=upsample1,
+                                   filters=16,
+                                   kernel_size=[3, 3],
+                                   padding="same",
+                                   activation=tf.nn.relu,
+                                   name="d_conv1")
+        upsample2 = tf.image.resize_images(
+                                           images=deconv2,
+                                           size=[16, 16],
+                                           method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        deconv3 = tf.layers.conv2d(
+                                   inputs=upsample2,
+                                   filters=16,
+                                   kernel_size=[3, 3],
+                                   padding="same",
+                                   activation=tf.nn.relu,
+                                   name="d_conv2")
+        upsample3 = tf.image.resize_images(
+                                           images=deconv3,
+                                           size=[32, 32],
+                                           method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        deconv4 = tf.layers.conv2d(
+                                   inputs=upsample3,
+                                   filters=32,
+                                   kernel_size=[3, 3],
+                                   padding="same",
+                                   activation=tf.nn.relu,
+                                   name="d_conv3")
+        upsample4 = tf.image.resize_images(
+                                           images=deconv4,
+                                           size=[IM_SIZE, IM_SIZE],
+                                           method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        decoded = tf.layers.conv2d(
+                                   inputs=upsample4,
+                                   filters=NB_CHANNELS,
+                                   kernel_size=[3, 3],
+                                   padding="same",
+                                   activation=tf.nn.sigmoid)
+        return decoded
+
+
 def discriminator(x, reuse=False):
     """
     Discriminator that is used to match the posterior distribution with a given prior distribution.
-    :param x: tensor of shape [batch_size, z_dim]
+    :param x: tensor of shape [BATCH_SIZE, Z_DIM]
     :param reuse: True -> Reuse the discriminator variables,
                   False -> Create or search of variables before creating
-    :return: tensor of shape [batch_size, 1]
+    :return: tensor of shape [BATCH_SIZE, 1]
     """
     if reuse:
         tf.get_variable_scope().reuse_variables()
     with tf.name_scope('Discriminator'):
-        dc_den1 = tf.nn.relu(dense(x, z_dim, n_l1, name='dc_den1'))
+        dc_den1 = tf.nn.relu(dense(x, Z_DIM, n_l1, name='dc_den1'))
         dc_den2 = tf.nn.relu(dense(dc_den1, n_l1, n_l2, name='dc_den2'))
         output = dense(dc_den2, n_l2, 1, name='dc_output')
         return output
@@ -149,15 +266,15 @@ def train(train_model=True):
     :return: does not return anything
     """
     with tf.variable_scope(tf.get_variable_scope()):
-        encoder_output = encoder(x_input)
-        decoder_output = decoder(encoder_output)
+        encoder_output = encoder2d(x_input)
+        decoder_output = decoder2d(encoder_output)
 
     with tf.variable_scope(tf.get_variable_scope()):
         d_real = discriminator(real_distribution)
         d_fake = discriminator(encoder_output, reuse=True)
 
     with tf.variable_scope(tf.get_variable_scope()):
-        decoder_image = decoder(decoder_input, reuse=True)
+        decoder_image = decoder2d(decoder_input, reuse=True)
 
     # Autoencoder loss
     autoencoder_loss = tf.reduce_mean(tf.square(x_target - decoder_output))
@@ -186,8 +303,8 @@ def train(train_model=True):
     init = tf.global_variables_initializer()
 
     # Reshape immages to display them
-    input_images = tf.reshape(x_input, [-1, 28, 28, 1])
-    generated_images = tf.reshape(decoder_output, [-1, 28, 28, 1])
+    input_images = tf.reshape(x_input, [-1, IM_SIZE, IM_SIZE, NB_CHANNELS])
+    generated_images = tf.reshape(decoder_output, [-1, IM_SIZE, IM_SIZE, NB_CHANNELS])
 
     # Tensorboard visualization
     tf.summary.scalar(name='Autoencoder Loss', tensor=autoencoder_loss)
@@ -207,12 +324,17 @@ def train(train_model=True):
             tensorboard_path, saved_model_path, log_path = form_results()
             sess.run(init)
             writer = tf.summary.FileWriter(logdir=tensorboard_path, graph=sess.graph)
-            for i in range(n_epochs):
-                n_batches = int(mnist.train.num_examples / batch_size)
-                print("------------------Epoch {}/{}------------------".format(i, n_epochs))
+            for i in range(N_EPOCHS):
+                n_batches = int(len(dataset) / BATCH_SIZE)
+                print("------------------Epoch {}/{}------------------".format(i, N_EPOCHS))
+                np.random.shuffle(shuffled_dataset)
                 for b in range(1, n_batches + 1):
-                    z_real_dist = np.random.randn(batch_size, z_dim) * 5.
-                    batch_x, _ = mnist.train.next_batch(batch_size)
+                    z_real_dist = np.random.randn(BATCH_SIZE, Z_DIM) * 5.
+                    # batch_x, _ = mnist.train.next_batch(BATCH_SIZE)
+
+                    begin = (b-1)*BATCH_SIZE
+                    end = min(b*BATCH_SIZE, len(dataset))
+                    batch_x = shuffled_dataset[begin:end]
                     sess.run(autoencoder_optimizer, feed_dict={x_input: batch_x, x_target: batch_x})
                     sess.run(discriminator_optimizer,
                              feed_dict={x_input: batch_x, x_target: batch_x, real_distribution: z_real_dist})
