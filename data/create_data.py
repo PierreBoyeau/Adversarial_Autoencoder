@@ -1,9 +1,10 @@
 import skimage.io
 import skimage.transform
 import numpy as np
+import glob
 
 INPUT_SCALE = 64
-IMAGES_PATH = "."
+IMAGES_PATH = glob.glob("../../ANNOTATION_TOOL/SANOFI_ITALY_PIERRE_catalog/*/*.jpg")
 
 def get_training_data(images_path):
     train_data = []

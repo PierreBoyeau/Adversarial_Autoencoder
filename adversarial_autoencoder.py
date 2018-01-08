@@ -24,7 +24,7 @@ IM_SIZE = 64
 NB_CHANNELS = 3
 Z_DIM = 128
 BATCH_SIZE = 100
-N_EPOCHS = 1000
+N_EPOCHS = 500
 learning_rate = 0.001
 beta1 = 0.9
 results_path = './Results/Adversarial_Autoencoder'
@@ -172,7 +172,7 @@ def encoder2d(x, reuse=False):
             kernel_size=[2, 2],
             padding="same",
             activation=tf.nn.relu,
-            name="e_conv3")
+            name="e_conv4")
         pool4 = tf.layers.max_pooling2d(inputs=conv4, pool_size=[2, 2], strides=2)
         bottleneck = tf.layers.flatten(pool4)
         return bottleneck
@@ -206,7 +206,7 @@ def decoder2d(x, reuse=False):
                                    kernel_size=[3, 3],
                                    padding="same",
                                    activation=tf.nn.relu,
-                                   name="d_conv1")
+                                   name="d_conv2")
         upsample2 = tf.image.resize_images(
                                            images=deconv2,
                                            size=[16, 16],
@@ -217,7 +217,7 @@ def decoder2d(x, reuse=False):
                                    kernel_size=[3, 3],
                                    padding="same",
                                    activation=tf.nn.relu,
-                                   name="d_conv2")
+                                   name="d_conv3")
         upsample3 = tf.image.resize_images(
                                            images=deconv3,
                                            size=[32, 32],
@@ -228,7 +228,7 @@ def decoder2d(x, reuse=False):
                                    kernel_size=[3, 3],
                                    padding="same",
                                    activation=tf.nn.relu,
-                                   name="d_conv3")
+                                   name="d_conv4")
         upsample4 = tf.image.resize_images(
                                            images=deconv4,
                                            size=[IM_SIZE, IM_SIZE],
@@ -339,7 +339,7 @@ def train(train_model=True):
                     sess.run(discriminator_optimizer,
                              feed_dict={x_input: batch_x, x_target: batch_x, real_distribution: z_real_dist})
                     sess.run(generator_optimizer, feed_dict={x_input: batch_x, x_target: batch_x})
-                    if b % 50 == 0:
+                    if b % 5 == 0:
                         a_loss, d_loss, g_loss, summary = sess.run(
                             [autoencoder_loss, dc_loss, generator_loss, summary_op],
                             feed_dict={x_input: batch_x, x_target: batch_x,
