@@ -15,18 +15,20 @@ shuffled_dataset = dataset.copy()
 
 # Parameters
 input_dim = 784
-n_l1 = 64
-n_l2 = 64
+n_l1 = 1000
+n_l2 = 1000
+n_l3 = 1000
 
+TINY = 1e-8
 
 IM_SIZE = 64
 NB_CHANNELS = 3
-Z_DIM = 128
-BATCH_SIZE = 32
+Z_DIM = 50
+BATCH_SIZE = 128
 N_EPOCHS = 500
 learning_rate = 0.00005
 beta1 = 0.9
-TRAIN_DISC_EVERY = 5
+TRAIN_DISC_EVERY = 1
 results_path = './Results/Adversarial_Autoencoder'
 
 # Placeholders for input data and the targets
@@ -147,7 +149,7 @@ def encoder2d(x, reuse=False):
             filters=64,
             kernel_size=[3, 3],
             padding="same",
-            activation=tf.nn.relu,
+            activation=tf.nn.elu,
             name="e_conv1")
         pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2, name='e_pool1')
         conv2 = tf.layers.conv2d(
@@ -155,7 +157,7 @@ def encoder2d(x, reuse=False):
             filters=64,
             kernel_size=[3, 3],
             padding="same",
-            activation=tf.nn.relu,
+            activation=tf.nn.elu,
             name="e_conv2")
         pool2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2, name='e_pool2')
         # pool2_flattened = tf.layers.flatten(pool2, name='e_pool2flatten')
@@ -165,15 +167,16 @@ def encoder2d(x, reuse=False):
             filters=128,
             kernel_size=[3, 3],
             padding="same",
-            activation=tf.nn.relu,
+            activation=tf.nn.elu,
             name="e_conv3")
         pool3 = tf.layers.max_pooling2d(inputs=conv3, pool_size=[2, 2], strides=2, name='e_pool3')
         pool3_flattened = tf.layers.flatten(pool3, name='e_pool3flatten')
 
         batch_norm1 = tf.layers.batch_normalization(pool3_flattened, name='e_batch_norm1')
-        fc1 = tf.layers.dense(inputs=batch_norm1, units=1024, activation=tf.nn.relu, name='e_fc1')
+        fc1 = tf.layers.dense(inputs=batch_norm1, units=1024, activation=tf.nn.elu, name='e_fc1')
         batch_norm2 = tf.layers.batch_normalization(fc1, name='e_batch_norm2')
-        fc2 = tf.layers.dense(inputs=batch_norm2, units=Z_DIM, activation=tf.nn.relu, name='e_fc2')
+        #fc2 = tf.layers.dense(inputs=batch_norm2, units=Z_DIM, activation=tf.nn.elu, name='e_fc2')
+        fc2 = dense(batch_norm2, 1024, Z_DIM, 'e_fc2')
 
         print fc2.get_shape()
         return fc2
@@ -189,9 +192,9 @@ def decoder2d(x, reuse=False):
     if reuse:
         tf.get_variable_scope().reuse_variables()
     with tf.name_scope('Decoder'):
-        d_fc1 = tf.layers.dense(inputs=x, units=1024, activation=tf.nn.relu, name='d_fc1')
+        d_fc1 = tf.layers.dense(inputs=x, units=1024, activation=tf.nn.elu, name='d_fc1')
         d_batch_norm1 = tf.layers.batch_normalization(d_fc1, name='d_batch_norm1')
-        d_fc2 = tf.layers.dense(inputs=d_batch_norm1, units=int(IM_SIZE/8*IM_SIZE/8*128), activation=tf.nn.relu, name='d_fc2')
+        d_fc2 = tf.layers.dense(inputs=d_batch_norm1, units=int(IM_SIZE/8*IM_SIZE/8*128), activation=tf.nn.elu, name='d_fc2')
         d_batch_norm2 = tf.layers.batch_normalization(d_fc2, name='d_batch_norm2')
         d_fc2_reshaped = tf.reshape(d_batch_norm2, [-1, int(IM_SIZE/8), int(IM_SIZE/8), 128], name='d_fc2flatten')
 
@@ -200,7 +203,7 @@ def decoder2d(x, reuse=False):
             filters=128,
             kernel_size=[3, 3],
             padding="same",
-            activation=tf.nn.relu,
+            activation=tf.nn.elu,
             name="d_conv1")
         upsample1 = tf.image.resize_images(
             images=deconv1,
@@ -212,7 +215,7 @@ def decoder2d(x, reuse=False):
                                    filters=64,
                                    kernel_size=[3, 3],
                                    padding="same",
-                                   activation=tf.nn.relu,
+                                   activation=tf.nn.elu,
                                    name="d_conv2")
         upsample2 = tf.image.resize_images(
                                            images=deconv2,
@@ -223,7 +226,7 @@ def decoder2d(x, reuse=False):
                                    filters=64,
                                    kernel_size=[3, 3],
                                    padding="same",
-                                   activation=tf.nn.relu,
+                                   activation=tf.nn.elu,
                                    name="d_conv3")
         upsample3 = tf.image.resize_images(
                                            images=deconv3,
@@ -234,7 +237,7 @@ def decoder2d(x, reuse=False):
         #                            filters=32,
         #                            kernel_size=[3, 3],
         #                            padding="same",
-        #                            activation=tf.nn.relu,
+        #                            activation=tf.nn.elu,
         #                            name="d_conv4")
         # upsample4 = tf.image.resize_images(
         #                                    images=deconv4,
@@ -250,7 +253,7 @@ def decoder2d(x, reuse=False):
         return decoded
 
 
-def discriminator(x, reuse=False):
+def discriminator(x, reuse=False, normalize=False):
     """
     Discriminator that is used to match the posterior distribution with a given prior distribution.
     :param x: tensor of shape [BATCH_SIZE, Z_DIM]
@@ -258,12 +261,28 @@ def discriminator(x, reuse=False):
                   False -> Create or search of variables before creating
     :return: tensor of shape [BATCH_SIZE, 1]
     """
+
     if reuse:
         tf.get_variable_scope().reuse_variables()
     with tf.name_scope('Discriminator'):
-        dc_den1 = tf.nn.relu(dense(x, Z_DIM, n_l1, name='dc_den1'))
-        dc_den2 = tf.nn.relu(dense(dc_den1, n_l1, n_l2, name='dc_den2'))
-        output = dense(dc_den2, n_l2, 1, name='dc_output')
+        if normalize:
+            mean, var = tf.nn.moments(x, axes=[1], name='dc_meanvar', keep_dims=True)
+            x_begin = tf.div(tf.subtract(x, mean), tf.sqrt(var), name='dc_xbegin')
+        else:
+            x_begin = x
+        # dc_den1 = tf.nn.elu(dense(x_begin, Z_DIM, n_l1, name='dc_den1'))
+        # dc_den2 = tf.nn.elu(dense(dc_den1, n_l1, n_l2, name='dc_den2'))
+        # dc_batch_norm1 = tf.layers.batch_normalization(dc_den2, name='dc_batch_norm1')
+        #
+        # output = dense(dc_batch_norm1, n_l2, 1, name='dc_output')
+
+        # Version with 3 FC since it seems discriminator isn't good enough
+        dc_den1 = tf.nn.elu(dense(x_begin, Z_DIM, n_l1, name='dc_den1'))
+        dc_den2 = tf.nn.elu(dense(dc_den1, n_l1, n_l2, name='dc_den2'))
+        dc_den3 = tf.nn.elu(dense(dc_den2, n_l2, n_l3, name='dc_den3'))
+        dc_batch_norm1 = tf.layers.batch_normalization(dc_den3, name='dc_batch_norm1')
+
+        output = dense(dc_batch_norm1, n_l2, 1, name='dc_output')
         return output
 
 
@@ -297,6 +316,16 @@ def train(train_model=True):
     generator_loss = tf.reduce_mean(
         tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(d_fake), logits=d_fake))
 
+    # # LOSSES AS EXPLAINED IN PAPER
+    # sigm_real = tf.nn.sigmoid(d_real)
+    # sigm_fake = tf.nn.sigmoid(d_fake)
+    #
+    # # Discrimminator Loss
+    # dc_loss = -tf.reduce_mean(tf.log(sigm_real + TINY) + tf.log(1. - sigm_fake + TINY))
+    #
+    # # Generator loss
+    # generator_loss = -tf.reduce_mean(tf.log(sigm_fake + TINY))
+
     all_variables = tf.trainable_variables()
     dc_var = [var for var in all_variables if 'dc_' in var.name]
     en_var = [var for var in all_variables if 'e_' in var.name]
@@ -321,8 +350,8 @@ def train(train_model=True):
     tf.summary.scalar(name='Generator Loss', tensor=generator_loss)
     tf.summary.histogram(name='Encoder Distribution', values=encoder_output)
     tf.summary.histogram(name='Real Distribution', values=real_distribution)
-    tf.summary.image(name='Input Images', tensor=input_images, max_outputs=5)
-    tf.summary.image(name='Generated Images', tensor=generated_images, max_outputs=5)
+    tf.summary.image(name='Input Images', tensor=input_images, max_outputs=3)
+    tf.summary.image(name='Generated Images', tensor=generated_images, max_outputs=3)
     summary_op = tf.summary.merge_all()
 
     # Saving the model
