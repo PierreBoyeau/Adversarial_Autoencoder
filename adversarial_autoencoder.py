@@ -23,8 +23,8 @@ TINY = 1e-8
 
 IM_SIZE = 64
 NB_CHANNELS = 3
-Z_DIM = 50
-BATCH_SIZE = 128
+Z_DIM = 35
+BATCH_SIZE = 256
 N_EPOCHS = 500
 learning_rate = 0.00005
 beta1 = 0.9
@@ -111,8 +111,8 @@ def encoder(x, reuse=False):
     if reuse:
         tf.get_variable_scope().reuse_variables()
     with tf.name_scope('Encoder'):
-        e_dense_1 = tf.nn.relu(dense(x, input_dim, n_l1, 'e_dense_1'))
-        e_dense_2 = tf.nn.relu(dense(e_dense_1, n_l1, n_l2, 'e_dense_2'))
+        e_dense_1 = tf.nn.elu(dense(x, input_dim, n_l1, 'e_dense_1'))
+        e_dense_2 = tf.nn.elu(dense(e_dense_1, n_l1, n_l2, 'e_dense_2'))
         latent_variable = dense(e_dense_2, n_l2, Z_DIM, 'e_latent_variable')
         return latent_variable
 
@@ -127,8 +127,8 @@ def decoder(x, reuse=False):
     if reuse:
         tf.get_variable_scope().reuse_variables()
     with tf.name_scope('Decoder'):
-        d_dense_1 = tf.nn.relu(dense(x, Z_DIM, n_l2, 'd_dense_1'))
-        d_dense_2 = tf.nn.relu(dense(d_dense_1, n_l2, n_l1, 'd_dense_2'))
+        d_dense_1 = tf.nn.elu(dense(x, Z_DIM, n_l2, 'd_dense_1'))
+        d_dense_2 = tf.nn.elu(dense(d_dense_1, n_l2, n_l1, 'd_dense_2'))
         output = tf.nn.sigmoid(dense(d_dense_2, n_l1, input_dim, 'd_output'))
         return output
 
